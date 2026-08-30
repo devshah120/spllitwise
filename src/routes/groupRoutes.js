@@ -3,9 +3,17 @@ const { body } = require('express-validator');
 const {
   createGroup,
   getMyGroups,
+  getGroupTypes,
   getGroup,
   updateGroup,
   addMember,
+  inviteMember,
+  revokeInvite,
+  getInvite,
+  rotateInvite,
+  setInviteEnabled,
+  previewInvite,
+  joinByCode,
   removeMember,
   deleteGroup,
   getBalances,
@@ -25,11 +33,30 @@ const router = express.Router();
 
 router.use(protect);
 
+// The catalogue of group types the picker renders. Declared before `/:id` so
+// "types" is not swallowed as a group id.
+router.get('/types', getGroupTypes);
+
+// Joining by invite code (from a link or a scanned QR code).
+router.post(
+  '/join',
+  [body('code').trim().notEmpty().withMessage('Invite code is required')],
+  validate,
+  joinByCode
+);
+router.get('/join/:code', previewInvite);
+
 router
   .route('/')
   .get(getMyGroups)
   .post(
-    [body('name').trim().notEmpty().withMessage('Group name is required')],
+    [
+      body('name').trim().notEmpty().withMessage('Group name is required'),
+      body('balanceLimit')
+        .optional()
+        .isFloat({ min: 0 })
+        .withMessage('Balance limit must be zero or greater'),
+    ],
     validate,
     createGroup
   );
@@ -38,12 +65,18 @@ router.route('/:id').get(getGroup).patch(updateGroup).delete(deleteGroup);
 
 router.get('/:id/balances', getBalances);
 
-router.post(
-  '/:id/members',
-  [body('userId').notEmpty().withMessage('userId is required')],
-  validate,
-  addMember
-);
+// Invite code: read, rotate, enable/disable.
+router
+  .route('/:id/invite')
+  .get(getInvite)
+  .patch(setInviteEnabled);
+router.post('/:id/invite/rotate', rotateInvite);
+
+// Pending invitations by email / mobile.
+router.post('/:id/invites', inviteMember);
+router.delete('/:id/invites/:inviteId', revokeInvite);
+
+router.post('/:id/members', addMember);
 router.delete('/:id/members/:userId', removeMember);
 
 // Nested expense routes (groupId param).

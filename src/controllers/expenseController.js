@@ -2,9 +2,23 @@ const Group = require('../models/Group');
 const Expense = require('../models/Expense');
 const asyncHandler = require('../utils/asyncHandler');
 const { buildSplits } = require('../utils/splitCalculator');
+const User = require('../models/User');
+const { checkBalanceLimit } = require('../utils/balances');
 
 const isMember = (group, userId) =>
   group.members.some((m) => m.toString() === userId.toString());
+
+// Turns a limit breach into the 409 the client shows the user.
+const limitResponse = async (res, breach, verb) => {
+  const who = await User.findById(breach.userId).select('name');
+  return res.status(409).json({
+    message: `This ${verb} would push ${
+      who ? who.name : 'a member'
+    } past the group balance limit of ${breach.limit} (they would owe ${breach.owed}).`,
+    limitExceeded: true,
+    ...breach,
+  });
+};
 
 const populateExpense = (query) =>
   query.populate('paidBy', 'name email avatarUrl').populate('splits.user', 'name email avatarUrl');
@@ -48,6 +62,9 @@ const createExpense = asyncHandler(async (req, res) => {
   } catch (err) {
     return res.status(400).json({ message: err.message });
   }
+
+  const breach = await checkBalanceLimit(group, splits, payer, null);
+  if (breach) return limitResponse(res, breach, 'expense');
 
   const expense = await Expense.create({
     group: groupId,
@@ -136,10 +153,9 @@ const updateExpense = asyncHandler(async (req, res) => {
         return res.status(400).json({ message: `Participant ${p} is not a group member` });
       }
     }
+    let newSplits;
     try {
-      expense.amount = newAmount;
-      expense.splitType = newType;
-      expense.splits = buildSplits({
+      newSplits = buildSplits({
         participants: parts,
         amount: newAmount,
         splitType: newType,
@@ -148,6 +164,20 @@ const updateExpense = asyncHandler(async (req, res) => {
     } catch (err) {
       return res.status(400).json({ message: err.message });
     }
+
+    // Measure the limit against the *original* stored expense, then apply.
+    const original = await Expense.findById(expense._id).lean();
+    const breach = await checkBalanceLimit(
+      group,
+      newSplits,
+      expense.paidBy,
+      original
+    );
+    if (breach) return limitResponse(res, breach, 'change');
+
+    expense.amount = newAmount;
+    expense.splitType = newType;
+    expense.splits = newSplits;
   }
 
   await expense.save();
