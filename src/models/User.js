@@ -17,16 +17,33 @@ const userSchema = new mongoose.Schema(
     },
     mobileNumber: {
       type: String,
-      required: [true, 'Mobile number is required'],
       unique: true,
+      sparse: true,
       match: [/^[6-9]\d{9}$/, 'Please enter a valid 10-digit mobile number starting with 6, 7, 8, or 9'],
       trim: true,
     },
+    // Password is required only for local (email/mobile) accounts.
+    // Google accounts have no password.
     password: {
       type: String,
-      required: [true, 'Password is required'],
+      required: [
+        function () {
+          return this.provider === 'local';
+        },
+        'Password is required',
+      ],
       minlength: 8,
       select: false,
+    },
+    provider: {
+      type: String,
+      enum: ['local', 'google'],
+      default: 'local',
+    },
+    googleId: {
+      type: String,
+      unique: true,
+      sparse: true,
     },
     avatarUrl: {
       type: String,
