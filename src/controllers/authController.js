@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const { OAuth2Client } = require('google-auth-library');
 const User = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
@@ -22,8 +23,9 @@ const sanitize = (user) => ({
 const register = asyncHandler(async (req, res) => {
   const { name, email, mobileNumber, password } = req.body;
 
-  if (!mobileNumber) {
-    return res.status(400).json({ message: 'Mobile number is required' });
+  // At least one identifier (email or mobile) is required
+  if (!email && !mobileNumber) {
+    return res.status(400).json({ message: 'Email or mobile number is required' });
   }
 
   if (email) {
@@ -40,7 +42,7 @@ const register = asyncHandler(async (req, res) => {
     }
   }
 
-  const user = await User.create({ name, email, mobileNumber, password });
+  const user = await User.create({ name, email: email || undefined, mobileNumber: mobileNumber || undefined, password });
   const token = signToken(user._id);
 
   res.status(201).json({ token, user: sanitize(user) });
@@ -54,7 +56,17 @@ const login = asyncHandler(async (req, res) => {
     $or: [{ email: identifier }, { mobileNumber: identifier }]
   }).select('+password');
 
-  if (!user || !(await user.comparePassword(password))) {
+  if (!user) {
+    return res.status(401).json({ message: 'Invalid email/mobile number or password' });
+  }
+
+  // Check if user is a Google-only account (no password field)
+  if (user.provider === 'google' || !user.password) {
+    return res.status(401).json({ message: 'This account uses Google Sign-In. Please continue with Google instead.' });
+  }
+
+  const passwordMatch = await user.comparePassword(password);
+  if (!passwordMatch) {
     return res.status(401).json({ message: 'Invalid email/mobile number or password' });
   }
 
@@ -119,6 +131,7 @@ const googleLogin = asyncHandler(async (req, res) => {
       googleId,
       provider: 'google',
       avatarUrl: picture || '',
+      // Google-only accounts have no password, so no mobileNumber required either
     });
   }
 
@@ -131,4 +144,85 @@ const getMe = asyncHandler(async (req, res) => {
   res.json({ user: sanitize(req.user) });
 });
 
-module.exports = { register, login, googleLogin, getMe };
+// POST /api/auth/forgot-password
+const forgotPassword = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+
+  const user = await User.findOne({ email });
+  if (!user) {
+    // Don't leak whether email exists; return 200 anyway
+    return res.status(200).json({ message: 'If an account with that email exists, a password reset link has been sent.' });
+  }
+
+  // Generate a secure reset token (32-byte hex string, valid for 1 hour)
+  const resetToken = crypto.randomBytes(32).toString('hex');
+  const resetHash = crypto.createHash('sha256').update(resetToken).digest('hex');
+  user.resetPasswordToken = resetHash;
+  user.resetPasswordExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+  await user.save();
+
+  // In production, send an email with a reset link: http://yourapp.com/reset-password?token=resetToken
+  // For now, we return the token to the frontend (the frontend will send it back in the reset request).
+  // Frontend should NOT display this token to the user; instead, they'd click a link from the email.
+  const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password?token=${resetToken}&email=${email}`;
+  console.log(`[PASSWORD_RESET] Reset link for ${email}: ${resetUrl}`);
+
+  // TODO: Send email with reset link
+  // await sendPasswordResetEmail(user.email, resetUrl, user.name);
+
+  res.status(200).json({ message: 'If an account with that email exists, a password reset link has been sent.' });
+});
+
+// POST /api/auth/verify-reset-token
+const verifyResetToken = asyncHandler(async (req, res) => {
+  const { email, token } = req.body;
+
+  if (!email || !token) {
+    return res.status(400).json({ message: 'Email and reset token are required' });
+  }
+
+  const resetHash = crypto.createHash('sha256').update(token).digest('hex');
+  const user = await User.findOne({
+    email,
+    resetPasswordToken: resetHash,
+    resetPasswordExpires: { $gt: new Date() }
+  });
+
+  if (!user) {
+    return res.status(400).json({ message: 'Reset token is invalid or has expired' });
+  }
+
+  res.status(200).json({ message: 'Token is valid' });
+});
+
+// POST /api/auth/reset-password
+const resetPassword = asyncHandler(async (req, res) => {
+  const { email, token, password } = req.body;
+
+  if (!email || !token || !password) {
+    return res.status(400).json({ message: 'Email, reset token, and new password are required' });
+  }
+
+  const resetHash = crypto.createHash('sha256').update(token).digest('hex');
+  const user = await User.findOne({
+    email,
+    resetPasswordToken: resetHash,
+    resetPasswordExpires: { $gt: new Date() }
+  });
+
+  if (!user) {
+    return res.status(400).json({ message: 'Reset token is invalid or has expired' });
+  }
+
+  // Update password (will be hashed by pre-save hook)
+  user.password = password;
+  user.resetPasswordToken = null;
+  user.resetPasswordExpires = null;
+
+  await user.save();
+
+  res.status(200).json({ message: 'Password has been reset successfully. Please log in with your new password.' });
+});
+
+module.exports = { register, login, googleLogin, getMe, forgotPassword, verifyResetToken, resetPassword };
