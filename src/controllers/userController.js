@@ -1,27 +1,49 @@
 const path = require('path');
 const fs = require('fs');
 const User = require('../models/User');
+const Group = require('../models/Group');
 const asyncHandler = require('../utils/asyncHandler');
 const { AVATAR_DIR } = require('../middleware/upload');
 
 // GET /api/users?search=term
-// Lists users, optionally filtered by name/email — used to add members to groups.
+// The caller's contacts: everyone who shares at least one group with them,
+// optionally filtered by name/email — used to add members to groups.
+// Never lists the whole userbase; someone with no groups yet gets nothing back
+// and reaches new people by email/mobile invite or an invite link instead.
 const listUsers = asyncHandler(async (req, res) => {
   const { search } = req.query;
-  const filter = {};
+
+  const groups = await Group.find({ members: req.user._id }).select('members');
+  const contactIds = [
+    ...new Set(
+      groups.flatMap((g) => g.members.map(String)).filter((id) => id !== req.user._id.toString())
+    ),
+  ];
+  if (!contactIds.length) return res.json({ users: [] });
+
+  const filter = { _id: { $in: contactIds } };
   if (search) {
+    // Escaped so a search term is matched literally, not as a regex.
+    const term = String(search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     filter.$or = [
-      { name: { $regex: search, $options: 'i' } },
-      { email: { $regex: search, $options: 'i' } },
+      { name: { $regex: term, $options: 'i' } },
+      { email: { $regex: term, $options: 'i' } },
     ];
   }
   const users = await User.find(filter).select('name email avatarUrl').limit(50);
   res.json({ users });
 });
 
-// GET /api/users/:id
+// GET /api/users/:id — readable for yourself, and for anyone you share a group
+// with. Other accounts are reported as not found rather than confirming they
+// exist to someone with no connection to them.
 const getUser = asyncHandler(async (req, res) => {
-  const user = await User.findById(req.params.id).select('name email avatarUrl createdAt');
+  const { id } = req.params;
+  if (id !== req.user._id.toString()) {
+    const shared = await Group.exists({ members: { $all: [req.user._id, id] } });
+    if (!shared) return res.status(404).json({ message: 'User not found' });
+  }
+  const user = await User.findById(id).select('name email avatarUrl createdAt');
   if (!user) return res.status(404).json({ message: 'User not found' });
   res.json({ user });
 });

@@ -57,14 +57,21 @@ const createGroup = asyncHandler(async (req, res) => {
       .json({ message: `Group type must be one of: ${GROUP_TYPES.join(', ')}` });
   }
 
-  // Only accept member ids that actually exist.
+  // Only accept people the creator already shares a group with — the same set
+  // the member picker offers. Anyone else is reached by invite, so a guessed
+  // or scraped user id cannot pull a stranger into a group.
   const requested = [...new Set(memberIds.map(String))].filter(
     (id) => id !== req.user._id.toString()
   );
   if (requested.length) {
-    const found = await User.find({ _id: { $in: requested } }).select('_id');
-    if (found.length !== requested.length) {
-      return res.status(400).json({ message: 'One or more members do not exist' });
+    const known = await Group.find({
+      members: { $all: [req.user._id] },
+    }).select('members');
+    const contacts = new Set(known.flatMap((g) => g.members.map(String)));
+    if (!requested.every((id) => contacts.has(id))) {
+      return res.status(403).json({
+        message: 'You can only add people you already share a group with — invite anyone else',
+      });
     }
   }
 
