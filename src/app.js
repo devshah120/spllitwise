@@ -1,3 +1,4 @@
+const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
@@ -17,6 +18,17 @@ app.use(express.json());
 if (process.env.NODE_ENV !== 'test') {
   app.use(morgan('dev'));
 }
+
+// Uploaded avatars. Served read-only and cached for a day — the filename
+// changes on every upload, so a stale copy is never shown.
+app.use(
+  '/uploads',
+  express.static(path.join(__dirname, '..', 'uploads'), {
+    maxAge: '1d',
+    fallthrough: true,
+    index: false,
+  })
+);
 
 // Health check
 app.get('/api/health', (req, res) => {

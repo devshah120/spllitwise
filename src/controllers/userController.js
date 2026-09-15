@@ -1,5 +1,8 @@
+const path = require('path');
+const fs = require('fs');
 const User = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
+const { AVATAR_DIR } = require('../middleware/upload');
 
 // GET /api/users?search=term
 // Lists users, optionally filtered by name/email — used to add members to groups.
@@ -98,4 +101,55 @@ const updateProfile = asyncHandler(async (req, res) => {
   res.json({ user: sanitize(user) });
 });
 
-module.exports = { listUsers, getUser, updateProfile };
+// Removes a previously uploaded avatar file, if the URL points at one of ours.
+// Externally hosted pictures (Google sign-in) are left alone.
+const removeOldAvatar = (avatarUrl) => {
+  if (!avatarUrl || !avatarUrl.includes('/uploads/avatars/')) return;
+  const name = path.basename(avatarUrl.split('?')[0]);
+  // Guard against a crafted URL escaping the avatars directory.
+  const target = path.join(AVATAR_DIR, name);
+  if (path.dirname(target) !== AVATAR_DIR) return;
+  fs.promises.unlink(target).catch(() => {
+    // Already gone, or never on disk — nothing to clean up.
+  });
+};
+
+// POST /api/users/avatar  (multipart/form-data, field name: "avatar")
+const uploadAvatar = asyncHandler(async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ message: 'No image was uploaded' });
+  }
+
+  const user = await User.findById(req.user.id);
+  if (!user) {
+    return res.status(404).json({ message: 'User not found' });
+  }
+
+  const previous = user.avatarUrl;
+  // Store an absolute URL so the app can use it directly, wherever it runs.
+  const base = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
+  user.avatarUrl = `${base}/uploads/avatars/${req.file.filename}`;
+  await user.save();
+
+  // Only once the new one is safely saved.
+  removeOldAvatar(previous);
+
+  res.json({ user: sanitize(user) });
+});
+
+// DELETE /api/users/avatar — go back to the generated initials avatar.
+const deleteAvatar = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user.id);
+  if (!user) {
+    return res.status(404).json({ message: 'User not found' });
+  }
+
+  const previous = user.avatarUrl;
+  user.avatarUrl = '';
+  await user.save();
+  removeOldAvatar(previous);
+
+  res.json({ user: sanitize(user) });
+});
+
+module.exports = { listUsers, getUser, updateProfile, uploadAvatar, deleteAvatar };
