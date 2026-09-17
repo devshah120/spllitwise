@@ -1,6 +1,7 @@
 const Group = require('../models/Group');
 const Settlement = require('../models/Settlement');
 const asyncHandler = require('../utils/asyncHandler');
+const { notifySettlement, notifySafely } = require('../utils/notifications');
 
 const isMember = (group, userId) =>
   group.members.some((m) => m.toString() === userId.toString());
@@ -37,6 +38,11 @@ const createSettlement = asyncHandler(async (req, res) => {
 
   const populated = await populate(Settlement.findById(settlement._id));
   res.status(201).json({ settlement: populated });
+
+  // Both parties — and the rest of the group — hear about the payment.
+  notifySafely(() =>
+    notifySettlement('recorded', { group, settlement, actor: req.user })
+  );
 });
 
 // GET /api/groups/:groupId/settlements
@@ -62,8 +68,14 @@ const deleteSettlement = asyncHandler(async (req, res) => {
     return res.status(403).json({ message: 'Not authorized to delete this settlement' });
   }
 
+  const snapshot = settlement.toObject();
+
   await settlement.deleteOne();
   res.json({ message: 'Settlement deleted' });
+
+  notifySafely(() =>
+    notifySettlement('deleted', { group, settlement: snapshot, actor: req.user })
+  );
 });
 
 module.exports = { createSettlement, getGroupSettlements, deleteSettlement };

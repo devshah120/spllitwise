@@ -3,6 +3,7 @@ const { OAuth2Client } = require('google-auth-library');
 const User = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
 const { signToken } = require('../utils/token');
+const { notifyWelcome, notifySafely } = require('../utils/notifications');
 
 const googleClient = new OAuth2Client();
 
@@ -46,6 +47,9 @@ const register = asyncHandler(async (req, res) => {
   const token = signToken(user._id);
 
   res.status(201).json({ token, user: sanitize(user) });
+
+  // Welcome mail, after the response — a relay problem must not fail signup.
+  notifySafely(() => notifyWelcome(user));
 });
 
 // POST /api/auth/login
@@ -124,6 +128,9 @@ const googleLogin = asyncHandler(async (req, res) => {
     }
   }
 
+  // Tracks whether this request created the account, so returning users and
+  // accounts merely linked to Google are not welcomed a second time.
+  let created = false;
   if (!user) {
     user = await User.create({
       name: name || (email ? email.split('@')[0] : 'User'),
@@ -133,10 +140,13 @@ const googleLogin = asyncHandler(async (req, res) => {
       avatarUrl: picture || '',
       // Google-only accounts have no password, so no mobileNumber required either
     });
+    created = true;
   }
 
   const token = signToken(user._id);
   res.json({ token, user: sanitize(user) });
+
+  if (created) notifySafely(() => notifyWelcome(user));
 });
 
 // GET /api/auth/me

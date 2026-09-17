@@ -4,6 +4,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const { buildSplits } = require('../utils/splitCalculator');
 const User = require('../models/User');
 const { checkBalanceLimit } = require('../utils/balances');
+const { notifyExpense, notifySafely } = require('../utils/notifications');
 
 const isMember = (group, userId) =>
   group.members.some((m) => m.toString() === userId.toString());
@@ -79,6 +80,11 @@ const createExpense = asyncHandler(async (req, res) => {
 
   const populated = await populateExpense(Expense.findById(expense._id));
   res.status(201).json({ expense: populated });
+
+  // Tell the other members, after the response has gone out.
+  notifySafely(() =>
+    notifyExpense('added', { group, expense, actor: req.user })
+  );
 });
 
 // GET /api/groups/:groupId/expenses
@@ -183,6 +189,10 @@ const updateExpense = asyncHandler(async (req, res) => {
   await expense.save();
   const populated = await populateExpense(Expense.findById(expense._id));
   res.json({ expense: populated });
+
+  notifySafely(() =>
+    notifyExpense('updated', { group, expense, actor: req.user })
+  );
 });
 
 // DELETE /api/expenses/:id
@@ -195,8 +205,15 @@ const deleteExpense = asyncHandler(async (req, res) => {
     return res.status(403).json({ message: 'Not authorized to delete this expense' });
   }
 
+  // Snapshot what the mail needs before the document disappears.
+  const snapshot = expense.toObject();
+
   await expense.deleteOne();
   res.json({ message: 'Expense deleted' });
+
+  notifySafely(() =>
+    notifyExpense('deleted', { group, expense: snapshot, actor: req.user })
+  );
 });
 
 module.exports = {
