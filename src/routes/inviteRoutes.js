@@ -1,7 +1,7 @@
 const express = require('express');
 const Group = require('../models/Group');
 const asyncHandler = require('../utils/asyncHandler');
-const { APP_SCHEME } = require('../utils/invite');
+const { APP_SCHEME, ANDROID_PACKAGE } = require('../utils/invite');
 
 const router = express.Router();
 
@@ -113,12 +113,46 @@ router.get('/:code', asyncHandler(async (req, res) => {
         ${group.description ? `<p>${escapeHtml(group.description)}</p>` : ''}
         <p>${memberCount} ${memberCount === 1 ? 'member' : 'members'}</p>
         <div class="code">${escapeHtml(group.inviteCode)}</div>
-        <a class="btn" href="${APP_SCHEME}://join/${escapeHtml(group.inviteCode)}">
+        <a class="btn" id="open-app"
+           href="${APP_SCHEME}://join/${escapeHtml(group.inviteCode)}">
           Open in the app
         </a>
-        <p class="muted">
+        <p class="muted" id="hint">
           Don't have the app open? Enter the code above on the Join screen.
-        </p>`,
+        </p>
+        <script>
+        (function () {
+          var code = ${JSON.stringify(group.inviteCode)};
+          var scheme = ${JSON.stringify(APP_SCHEME)};
+          var pkg = ${JSON.stringify(ANDROID_PACKAGE)};
+          var btn = document.getElementById('open-app');
+
+          // Chrome on Android silently drops links to an unregistered custom
+          // scheme, so the button there has to be an intent: URI naming the
+          // package. Everywhere else the plain scheme works and is left alone.
+          if (/Android/i.test(navigator.userAgent)) {
+            btn.href =
+              'intent://join/' + encodeURIComponent(code) +
+              '#Intent;scheme=' + scheme +
+              ';package=' + pkg +
+              ';S.browser_fallback_url=' +
+              encodeURIComponent(location.href) + ';end';
+          }
+
+          // If the app took over, the page gets hidden. If it is still visible
+          // a moment later the app is not installed, so say so rather than
+          // leaving the tap looking broken.
+          btn.addEventListener('click', function () {
+            setTimeout(function () {
+              if (document.visibilityState === 'visible') {
+                document.getElementById('hint').textContent =
+                  'PaisaSplit does not seem to be installed. ' +
+                  'Install it, then enter the code above on the Join screen.';
+              }
+            }, 1500);
+          });
+        })();
+        </script>`,
     })
   );
 }));

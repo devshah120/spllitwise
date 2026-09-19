@@ -8,6 +8,11 @@
 const APP_SCHEME = process.env.APP_SCHEME || 'paisasplit';
 const INVITE_BASE_URL =
   process.env.INVITE_BASE_URL || 'https://splitwise.app/join';
+// Android package id, used to build the `intent:` URI on the landing page.
+// Chrome refuses plain custom-scheme links, but honours an intent: URI that
+// names the target package.
+const ANDROID_PACKAGE =
+  process.env.ANDROID_PACKAGE || 'com.bondbyte.paisasplit';
 
 function buildInvite(group) {
   if (!group.inviteCode) return null;
@@ -29,4 +34,4 @@ function buildInvite(group) {
   };
 }
 
-module.exports = { buildInvite, APP_SCHEME, INVITE_BASE_URL };
+module.exports = { buildInvite, APP_SCHEME, INVITE_BASE_URL, ANDROID_PACKAGE };
