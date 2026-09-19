@@ -3,7 +3,9 @@
 //
 // APP_SCHEME / INVITE_BASE_URL come from the environment so the same code works
 // in development and production.
-const APP_SCHEME = process.env.APP_SCHEME || 'splitwise';
+// Must stay unique to this app — the generic "splitwise" is claimed by the
+// Splitwise app, which then swallows our invite links.
+const APP_SCHEME = process.env.APP_SCHEME || 'paisasplit';
 const INVITE_BASE_URL =
   process.env.INVITE_BASE_URL || 'https://splitwise.app/join';
 
