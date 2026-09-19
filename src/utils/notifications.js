@@ -8,6 +8,7 @@
 const User = require('../models/User');
 const templates = require('./emailTemplates');
 const { sendMailAsync } = require('./mailer');
+const { buildInvite } = require('./invite');
 
 const idOf = (value) => String(value && value._id ? value._id : value);
 
@@ -159,8 +160,40 @@ function notifySafely(promiseFactory) {
     .catch((err) => console.error('[notify] failed:', err.message));
 }
 
+/**
+ * Someone was invited to a group by email address.
+ *
+ * Unlike every other notification here the recipient is not a member and
+ * usually has no account, so there is no preference to respect — the address
+ * was typed in deliberately to reach them.
+ *
+ * @param {object} p
+ * @param {string} p.email  Where to send it.
+ * @param {object} p.group  Group document.
+ * @param {object} p.actor  req.user — who sent the invite.
+ */
+async function notifyGroupInvite({ email, group, actor }) {
+  if (!email) return;
+
+  const invite = buildInvite(group);
+  // No code means invites are off for this group; there is nothing to send.
+  if (!invite) return;
+
+  const mail = templates.groupInvite({
+    inviterName: await nameOf(actor),
+    groupName: group.name,
+    inviteCode: invite.code,
+    joinUrl: invite.link,
+    memberCount: (group.members || []).length,
+    date: new Date(),
+  });
+
+  sendMailAsync({ to: email, ...mail });
+}
+
 module.exports = {
   notifyWelcome,
+  notifyGroupInvite,
   notifyExpense,
   notifySettlement,
   notifySafely,

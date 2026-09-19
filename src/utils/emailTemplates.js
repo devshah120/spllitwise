@@ -55,6 +55,10 @@ const toText = (html) =>
     .replace(/&rsaquo;/g, '>')
     .replace(/&ldquo;|&rdquo;|&quot;/g, '"')
     .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&copy;/g, '(c)')
+    // &amp; last, so "&amp;lt;" does not turn into a working "<".
     .replace(/&amp;/g, '&')
     .split('\n')
     .map((line) => line.trim())
@@ -493,8 +497,119 @@ function welcome(p) {
   return { subject, html, text: toText(html) };
 }
 
+/**
+ * "Devarsh invited you to 'NATHDWARA 2026' on PaisaSplit"
+ *
+ * Goes to someone who is not on the app yet, so it carries the invite code and
+ * the join link rather than the usual "view in app" button, and it never calls
+ * the reader a member of anything.
+ *
+ * @param {object} p
+ * @param {string} p.inviterName  Who sent the invite.
+ * @param {string} p.groupName
+ * @param {string} p.inviteCode   The code to type on the Join screen.
+ * @param {string} p.joinUrl      Landing page that opens the app.
+ * @param {number} p.memberCount
+ * @param {Date}   p.date
+ */
+function groupInvite(p) {
+  const subject = `${p.inviterName} invited you to '${p.groupName}' on ${BRAND_NAME}`;
+  const members = `${p.memberCount} ${p.memberCount === 1 ? 'member' : 'members'}`;
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(subject)}</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f4f4f4;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f4f4;padding:24px 12px;">
+  <tr>
+    <td align="center">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background-color:#ffffff;border-radius:6px;">
+
+        <tr>
+          <td style="background-color:#1cc29f;padding:30px;border-radius:6px 6px 0 0;font-family:Helvetica,Arial,sans-serif;">
+            <div style="color:#ffffff;font-size:24px;font-weight:bold;">${esc(BRAND_NAME)}</div>
+            <div style="color:rgba(255,255,255,0.88);font-size:13px;padding-top:6px;">You have been invited to a group</div>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="padding:30px 30px 8px;font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:22px;color:#333333;">
+            Hi there,
+            <p style="margin:14px 0 0;color:#555555;font-size:14px;line-height:22px;">
+              <strong>${esc(p.inviterName)}</strong> has invited you to join
+              <strong>${esc(p.groupName)}</strong> (${esc(members)}) on ${esc(BRAND_NAME)},
+              where you can split bills and keep track of who owes what.
+            </p>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="padding:22px 30px 0;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #e0e0e0;border-radius:6px;">
+              <tr>
+                <td align="center" style="padding:22px;font-family:Helvetica,Arial,sans-serif;">
+                  <div style="font-size:11px;color:#888888;text-transform:uppercase;letter-spacing:0.4px;padding-bottom:10px;">Your invite code</div>
+                  <div style="font-size:26px;font-weight:bold;letter-spacing:6px;color:#1cc29f;font-family:Courier,monospace;">${esc(
+                    p.inviteCode
+                  )}</div>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+        <tr>
+          <td align="center" style="padding:26px 30px 4px;">
+            <a href="${esc(
+              p.joinUrl
+            )}" style="display:inline-block;background-color:${ACCENT};color:#ffffff;font-family:Helvetica,Arial,sans-serif;font-size:16px;font-weight:bold;text-decoration:none;padding:14px 36px;border-radius:4px;">Join ${esc(
+    p.groupName
+  )}</a>
+          </td>
+        </tr>
+
+        <tr>
+          <td align="center" style="padding:14px 30px 0;font-family:Helvetica,Arial,sans-serif;font-size:13px;line-height:20px;color:#888888;">
+            Already have ${esc(
+              BRAND_NAME
+            )}? Open it and enter the code above on the Join screen.
+          </td>
+        </tr>
+
+        <tr>
+          <td style="padding:26px 30px 30px;font-family:Helvetica,Arial,sans-serif;font-size:13px;line-height:20px;color:#888888;">
+            If you were not expecting this invite, you can safely ignore this email.
+          </td>
+        </tr>
+
+      </table>
+
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;">
+        <tr>
+          <td align="center" style="padding:18px 24px;font-family:Helvetica,Arial,sans-serif;font-size:11px;line-height:17px;color:#aaaaaa;">
+            &copy; ${new Date().getFullYear()} ${esc(
+    BRAND_NAME
+  )}. This is an automated message.
+          </td>
+        </tr>
+      </table>
+
+    </td>
+  </tr>
+</table>
+</body>
+</html>`;
+
+  return { subject, html, text: toText(html) };
+}
+
 module.exports = {
   welcome,
+  groupInvite,
   expenseAdded,
   expenseUpdated,
   expenseDeleted,

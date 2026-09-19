@@ -7,6 +7,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const { round2 } = require('../utils/splitCalculator');
 const { computeNet, simplifyDebts } = require('../utils/balances');
 const { buildInvite } = require('../utils/invite');
+const { notifyGroupInvite, notifySafely } = require('../utils/notifications');
 
 const MEMBER_FIELDS = 'name email mobileNumber avatarUrl';
 
@@ -199,12 +200,13 @@ const addMember = asyncHandler(async (req, res) => {
   res.json({ group: present(populated, req.user._id) });
 });
 
-// POST /api/groups/:id/invites  — record an invitation by email or mobile.
-// If the person already has an account they are added straight away.
+// POST /api/groups/:id/invites  — invite someone by email address.
+// If the person already has an account they are added straight away;
+// otherwise the invite is recorded and the code is mailed to them.
 const inviteMember = asyncHandler(async (req, res) => {
-  const { email, mobileNumber } = req.body;
-  if (!email && !mobileNumber) {
-    return res.status(400).json({ message: 'Provide an email or mobileNumber' });
+  const { email } = req.body;
+  if (!email || !String(email).trim()) {
+    return res.status(400).json({ message: 'Provide an email address' });
   }
 
   const group = await Group.findById(req.params.id);
@@ -213,12 +215,13 @@ const inviteMember = asyncHandler(async (req, res) => {
     return res.status(403).json({ message: 'Not a member of this group' });
   }
 
-  const normalisedEmail = email ? String(email).toLowerCase().trim() : undefined;
+  const normalisedEmail = String(email).toLowerCase().trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalisedEmail)) {
+    return res.status(400).json({ message: 'That does not look like an email address' });
+  }
 
   // Already on the app? Add them directly.
-  const existing = await User.findOne(
-    normalisedEmail ? { email: normalisedEmail } : { mobileNumber }
-  );
+  const existing = await User.findOne({ email: normalisedEmail });
   if (existing) {
     if (isMember(group, existing._id)) {
       return res.status(409).json({ message: 'User is already a member' });
@@ -234,10 +237,7 @@ const inviteMember = asyncHandler(async (req, res) => {
   }
 
   const duplicate = group.invites.find(
-    (inv) =>
-      inv.status === 'pending' &&
-      ((normalisedEmail && inv.email === normalisedEmail) ||
-        (mobileNumber && inv.mobileNumber === mobileNumber))
+    (inv) => inv.status === 'pending' && inv.email === normalisedEmail
   );
   if (duplicate) {
     return res.status(409).json({ message: 'An invite is already pending for them' });
@@ -245,16 +245,21 @@ const inviteMember = asyncHandler(async (req, res) => {
 
   group.invites.push({
     email: normalisedEmail,
-    mobileNumber,
     invitedBy: req.user._id,
   });
   await group.save();
+
+  // Detached: a slow or unreachable relay must not fail the request. The
+  // invite is already saved, and the code can still be shared by hand.
+  notifySafely(() =>
+    notifyGroupInvite({ email: normalisedEmail, group, actor: req.user })
+  );
 
   const populated = await loadGroup(group._id);
   res.status(201).json({
     group: present(populated, req.user._id),
     added: false,
-    message: 'Invite recorded — share the group link or QR code with them',
+    message: `Invite sent to ${normalisedEmail}`,
   });
 });
 
