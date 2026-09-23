@@ -30,6 +30,13 @@ const expenseSchema = new mongoose.Schema(
       required: [true, 'Description is required'],
       trim: true,
     },
+    // The broad kind of spend (Food & drink, Travel, ...); `description` is
+    // the free-text title within it, e.g. "Tea" under "Food & drink".
+    category: {
+      type: String,
+      default: 'Other',
+      trim: true,
+    },
     amount: {
       type: Number,
       required: [true, 'Amount is required'],

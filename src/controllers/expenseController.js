@@ -29,6 +29,7 @@ const createExpense = asyncHandler(async (req, res) => {
   const { groupId } = req.params;
   const {
     description,
+    category,
     amount,
     paidBy,
     splitType = 'equal',
@@ -70,6 +71,7 @@ const createExpense = asyncHandler(async (req, res) => {
   const expense = await Expense.create({
     group: groupId,
     description,
+    category,
     amount: Number(amount),
     paidBy: payer,
     splitType,
@@ -124,6 +126,7 @@ const updateExpense = asyncHandler(async (req, res) => {
 
   const {
     description,
+    category,
     amount,
     paidBy,
     splitType,
@@ -134,6 +137,7 @@ const updateExpense = asyncHandler(async (req, res) => {
   } = req.body;
 
   if (description !== undefined) expense.description = description;
+  if (category !== undefined) expense.category = category;
   if (date !== undefined) expense.date = date;
   if (notes !== undefined) expense.notes = notes;
 
