@@ -84,7 +84,10 @@ async function notifyExpense(kind, { group, expense, actor }) {
   ]);
   if (!recipients.length) return;
 
-  const payerId = idOf(expense.paidBy);
+  // Multi-payer expenses have several contributors; anyone in that list
+  // "paid", not just the primary payer stored on `paidBy`.
+  const payerIds = (expense.payers && expense.payers.length ? expense.payers : [{ user: expense.paidBy }])
+    .map((p) => idOf(p.user));
 
   const messages = recipients.map((member) => {
     const memberId = String(member._id);
@@ -96,7 +99,7 @@ async function notifyExpense(kind, { group, expense, actor }) {
       amount: expense.amount,
       currency: group.currency || 'INR',
       share: shareFor(expense.splits, memberId),
-      recipientPaid: memberId === payerId,
+      recipientPaid: payerIds.includes(memberId),
       date: expense.date,
     });
     return { to: member.email, ...mail };

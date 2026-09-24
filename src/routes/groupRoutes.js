@@ -21,7 +21,12 @@ const {
 const {
   createExpense,
   getGroupExpenses,
+  exportGroupExpensesCsv,
 } = require('../controllers/expenseController');
+const {
+  createRecurringExpense,
+  getGroupRecurringExpenses,
+} = require('../controllers/recurringExpenseController');
 const {
   createSettlement,
   getGroupSettlements,
@@ -79,6 +84,10 @@ router.delete('/:id/invites/:inviteId', revokeInvite);
 router.post('/:id/members', addMember);
 router.delete('/:id/members/:userId', removeMember);
 
+// CSV export — before the generic /:groupId/expenses route below so
+// "export" is never mistaken for an expense id.
+router.get('/:groupId/expenses/export', exportGroupExpensesCsv);
+
 // Nested expense routes (groupId param).
 router
   .route('/:groupId/expenses')
@@ -90,6 +99,24 @@ router
     ],
     validate,
     createExpense
+  );
+
+// Nested recurring-expense routes (groupId param). Editing/deleting a
+// specific template is handled by the top-level /recurring-expenses/:id
+// routes, matching the expense/settlement pattern above.
+router
+  .route('/:groupId/recurring-expenses')
+  .get(getGroupRecurringExpenses)
+  .post(
+    [
+      body('description').trim().notEmpty().withMessage('Description is required'),
+      body('amount').isFloat({ gt: 0 }).withMessage('Amount must be greater than 0'),
+      body('frequency')
+        .isIn(['weekly', 'fortnightly', 'monthly', 'yearly'])
+        .withMessage('Frequency must be weekly, fortnightly, monthly or yearly'),
+    ],
+    validate,
+    createRecurringExpense
   );
 
 // Nested settlement routes.

@@ -7,6 +7,8 @@ const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
 const groupRoutes = require('./routes/groupRoutes');
 const expenseRoutes = require('./routes/expenseRoutes');
+const recurringExpenseRoutes = require('./routes/recurringExpenseRoutes');
+const commentRoutes = require('./routes/commentRoutes');
 const settlementRoutes = require('./routes/settlementRoutes');
 const inviteRoutes = require('./routes/inviteRoutes');
 const { notFound, errorHandler } = require('./middleware/errorHandler');
@@ -40,6 +42,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/groups', groupRoutes);
 app.use('/api/expenses', expenseRoutes);
+app.use('/api/recurring-expenses', recurringExpenseRoutes);
+app.use('/api/comments', commentRoutes);
 app.use('/api/settlements', settlementRoutes);
 
 // Public invite landing page — what an invite link or scanned QR opens.

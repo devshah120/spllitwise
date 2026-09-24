@@ -17,8 +17,16 @@ async function computeNet(group) {
   });
 
   for (const exp of expenses) {
-    const payer = exp.paidBy.toString();
-    if (net[payer] !== undefined) net[payer] += exp.amount;
+    // Older documents (saved before multi-payer support) have no `payers`
+    // array — fall back to the single paidBy/amount they do have.
+    const contributions =
+      exp.payers && exp.payers.length > 0
+        ? exp.payers
+        : [{ user: exp.paidBy, amount: exp.amount }];
+    for (const c of contributions) {
+      const uid = c.user.toString();
+      if (net[uid] !== undefined) net[uid] += c.amount;
+    }
     for (const split of exp.splits) {
       const uid = split.user.toString();
       if (net[uid] !== undefined) net[uid] -= split.amount;
@@ -78,25 +86,34 @@ function simplifyDebts(net, members) {
 // create. Returns null when everything stays within budget, or a describing
 // object for the first member who would breach it.
 //
+// `payers` is the normalized [{ user, amount }] breakdown (one entry for a
+// single payer, more for a split payment).
 // `existingExpense` lets an edit roll back the expense's own current effect so
 // the check measures the state *after* the change rather than on top of itself.
-async function checkBalanceLimit(group, splits, payerId, existingExpense) {
+async function checkBalanceLimit(group, splits, payers, existingExpense) {
   if (!group.balanceLimit || group.balanceLimit <= 0) return null;
 
   const net = await computeNet(group);
 
   if (existingExpense) {
-    const oldPayer = existingExpense.paidBy.toString();
-    if (net[oldPayer] !== undefined) net[oldPayer] -= existingExpense.amount;
+    const oldContributions =
+      existingExpense.payers && existingExpense.payers.length > 0
+        ? existingExpense.payers
+        : [{ user: existingExpense.paidBy, amount: existingExpense.amount }];
+    for (const c of oldContributions) {
+      const uid = c.user.toString();
+      if (net[uid] !== undefined) net[uid] -= c.amount;
+    }
     for (const s of existingExpense.splits) {
       const uid = s.user.toString();
       if (net[uid] !== undefined) net[uid] += s.amount;
     }
   }
 
-  const total = splits.reduce((sum, s) => sum + s.amount, 0);
-  const payer = payerId.toString();
-  if (net[payer] !== undefined) net[payer] += total;
+  for (const p of payers) {
+    const uid = p.user.toString();
+    if (net[uid] !== undefined) net[uid] += p.amount;
+  }
   for (const s of splits) {
     const uid = s.user.toString();
     if (net[uid] !== undefined) net[uid] -= s.amount;
