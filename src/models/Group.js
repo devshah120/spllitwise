@@ -59,6 +59,23 @@ const groupSchema = new mongoose.Schema(
       uppercase: true,
       trim: true,
     },
+    // A remembered split ratio for this group (e.g. "always 60/40 between
+    // these two roommates"), so a new expense can start from it instead of
+    // an even split. Absent/empty means "no default — use an equal split",
+    // which is the common case; deliberately has no minimum-length
+    // validator so it behaves like every other optional array here.
+    defaultSplit: {
+      type: [
+        new mongoose.Schema(
+          {
+            user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+            percentage: { type: Number, required: true, min: 0, max: 100 },
+          },
+          { _id: false }
+        ),
+      ],
+      default: undefined,
+    },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',

@@ -6,6 +6,7 @@ const {
   getGroupTypes,
   getGroup,
   updateGroup,
+  setDefaultSplit,
   addMember,
   inviteMember,
   revokeInvite,
@@ -69,6 +70,7 @@ router
 router.route('/:id').get(getGroup).patch(updateGroup).delete(deleteGroup);
 
 router.get('/:id/balances', getBalances);
+router.patch('/:id/default-split', setDefaultSplit);
 
 // Invite code: read, rotate, enable/disable.
 router

@@ -3,6 +3,9 @@ const Expense = require('../models/Expense');
 const asyncHandler = require('../utils/asyncHandler');
 const { buildSplits, buildPayers, primaryPayer, round2 } = require('../utils/splitCalculator');
 const { getRate } = require('../utils/exchangeRates');
+const { RECEIPT_DIR } = require('../middleware/upload');
+const path = require('path');
+const fs = require('fs');
 const User = require('../models/User');
 const { checkBalanceLimit } = require('../utils/balances');
 const { notifyExpense, notifySafely } = require('../utils/notifications');
@@ -395,6 +398,63 @@ const csvEscape = (value) => {
   return /[",\r\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
 };
 
+// Removes a previously uploaded receipt file, if the URL points at one of
+// ours (an externally hosted one, if that ever exists, is left alone).
+const removeOldReceipt = (receiptUrl) => {
+  if (!receiptUrl || !receiptUrl.includes('/uploads/receipts/')) return;
+  const name = path.basename(receiptUrl.split('?')[0]);
+  const target = path.join(RECEIPT_DIR, name);
+  if (path.dirname(target) !== RECEIPT_DIR) return; // guard against a crafted URL
+  fs.promises.unlink(target).catch(() => {
+    // Already gone, or never on disk — nothing to clean up.
+  });
+};
+
+// POST /api/expenses/:id/receipt (multipart/form-data, field name: "receipt")
+const uploadExpenseReceipt = asyncHandler(async (req, res) => {
+  const expense = await Expense.findById(req.params.id);
+  if (!expense) return res.status(404).json({ message: 'Expense not found' });
+
+  const group = await Group.findById(expense.group);
+  if (!group || !isMember(group, req.user._id)) {
+    return res.status(403).json({ message: 'Not authorized to edit this expense' });
+  }
+
+  if (!req.file) {
+    return res.status(400).json({ message: 'No image was uploaded' });
+  }
+
+  const previous = expense.receiptUrl;
+  const base = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
+  expense.receiptUrl = `${base}/uploads/receipts/${req.file.filename}`;
+  await expense.save();
+
+  // Only once the new one is safely saved.
+  removeOldReceipt(previous);
+
+  const populated = await populateExpense(Expense.findById(expense._id));
+  res.json({ expense: populated });
+});
+
+// DELETE /api/expenses/:id/receipt
+const deleteExpenseReceipt = asyncHandler(async (req, res) => {
+  const expense = await Expense.findById(req.params.id);
+  if (!expense) return res.status(404).json({ message: 'Expense not found' });
+
+  const group = await Group.findById(expense.group);
+  if (!group || !isMember(group, req.user._id)) {
+    return res.status(403).json({ message: 'Not authorized to edit this expense' });
+  }
+
+  const previous = expense.receiptUrl;
+  expense.receiptUrl = '';
+  await expense.save();
+  removeOldReceipt(previous);
+
+  const populated = await populateExpense(Expense.findById(expense._id));
+  res.json({ expense: populated });
+});
+
 // DELETE /api/expenses/:id
 const deleteExpense = asyncHandler(async (req, res) => {
   const expense = await Expense.findById(req.params.id);
@@ -423,4 +483,6 @@ module.exports = {
   updateExpense,
   deleteExpense,
   exportGroupExpensesCsv,
+  uploadExpenseReceipt,
+  deleteExpenseReceipt,
 };

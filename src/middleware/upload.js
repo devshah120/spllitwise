@@ -57,4 +57,45 @@ const handleAvatarUpload = (req, res, next) => {
   });
 };
 
-module.exports = { handleAvatarUpload, AVATAR_DIR };
+// Receipt photos — same rules as an avatar, just their own directory so an
+// expense's bill photo is never confused with a profile picture, and a
+// bigger cap since a bill photo carries more detail than a face crop.
+const RECEIPT_DIR = path.join(__dirname, '..', '..', 'uploads', 'receipts');
+fs.mkdirSync(RECEIPT_DIR, { recursive: true });
+
+const receiptStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, RECEIPT_DIR),
+  filename: (req, file, cb) => {
+    // Named by the expense, not the uploader — anyone in the group can
+    // replace it, and the timestamp busts any cached copy of the old one.
+    const ext = ALLOWED.get(file.mimetype) || '.jpg';
+    cb(null, `${req.params.id}-${Date.now()}${ext}`);
+  },
+});
+
+const uploadReceipt = multer({
+  storage: receiptStorage,
+  fileFilter,
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+}).single('receipt');
+
+const handleReceiptUpload = (req, res, next) => {
+  uploadReceipt(req, res, (err) => {
+    if (err instanceof multer.MulterError) {
+      const message =
+        err.code === 'LIMIT_FILE_SIZE'
+          ? 'Image must be 10MB or smaller'
+          : 'Could not read the uploaded image';
+      return res.status(400).json({ message });
+    }
+    if (err) return res.status(400).json({ message: err.message });
+    next();
+  });
+};
+
+module.exports = {
+  handleAvatarUpload,
+  AVATAR_DIR,
+  handleReceiptUpload,
+  RECEIPT_DIR,
+};

@@ -113,6 +113,13 @@ const expenseSchema = new mongoose.Schema(
       default: '',
       trim: true,
     },
+    // The bill/receipt photo, if one was attached — an absolute URL under
+    // /uploads/receipts, same pattern as User.avatarUrl. Empty string means
+    // none, not an error: most expenses never get one.
+    receiptUrl: {
+      type: String,
+      default: '',
+    },
   },
   { timestamps: true }
 );

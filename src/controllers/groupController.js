@@ -157,6 +157,56 @@ const updateGroup = asyncHandler(async (req, res) => {
   res.json({ group: present(populated, req.user._id) });
 });
 
+// PATCH /api/groups/:id/default-split — remember a split ratio so a new
+// expense in this group starts from it instead of an even split.
+// `{ splits: [{ user, percentage }] }` sets it (percentages must sum to
+// 100 and every user must be a member); `{ splits: null }` clears it back
+// to "no default — use an equal split".
+const setDefaultSplit = asyncHandler(async (req, res) => {
+  const group = await Group.findById(req.params.id);
+  if (!group) return res.status(404).json({ message: 'Group not found' });
+  if (!isCreator(group, req.user._id)) {
+    return res.status(403).json({ message: 'Only the creator can change the default split' });
+  }
+
+  const { splits } = req.body;
+
+  if (splits === null || splits === undefined) {
+    group.defaultSplit = undefined;
+    await group.save();
+    const populated = await loadGroup(group._id);
+    return res.json({ group: present(populated, req.user._id) });
+  }
+
+  if (!Array.isArray(splits) || splits.length === 0) {
+    return res.status(400).json({ message: 'Provide at least one split, or null to clear it' });
+  }
+
+  const normalised = splits.map((s) => ({
+    user: String(s.user),
+    percentage: Number(s.percentage),
+  }));
+
+  for (const s of normalised) {
+    if (!isMember(group, s.user)) {
+      return res.status(400).json({ message: `${s.user} is not a group member` });
+    }
+    if (Number.isNaN(s.percentage) || s.percentage < 0) {
+      return res.status(400).json({ message: 'Each percentage must be zero or greater' });
+    }
+  }
+
+  const total = normalised.reduce((sum, s) => sum + s.percentage, 0);
+  if (Math.abs(total - 100) > 0.01) {
+    return res.status(400).json({ message: `Percentages must sum to 100 (got ${total})` });
+  }
+
+  group.defaultSplit = normalised;
+  await group.save();
+  const populated = await loadGroup(group._id);
+  res.json({ group: present(populated, req.user._id) });
+});
+
 // POST /api/groups/:id/members  — add an existing user by id, email or mobile.
 const addMember = asyncHandler(async (req, res) => {
   const { userId, email, mobileNumber } = req.body;
@@ -200,13 +250,24 @@ const addMember = asyncHandler(async (req, res) => {
   res.json({ group: present(populated, req.user._id) });
 });
 
-// POST /api/groups/:id/invites  — invite someone by email address.
-// If the person already has an account they are added straight away;
-// otherwise the invite is recorded and the code is mailed to them.
+// POST /api/groups/:id/invites  — invite someone by email address or mobile
+// number. If the person already has an account they are added straight
+// away; otherwise the invite is recorded so it clears the moment they join
+// through the link, QR code, or (once they sign up) a matching contact
+// detail.
+//
+// There's no SMS provider wired up here, so a phone invite isn't texted the
+// way an email one is mailed — the inviter shares the join link/code
+// themselves (the app's own "Share invite" already hands that to whatever
+// messaging app they pick), same as Splitwise's own phone invites work
+// without their own SMS gateway either.
 const inviteMember = asyncHandler(async (req, res) => {
-  const { email } = req.body;
-  if (!email || !String(email).trim()) {
-    return res.status(400).json({ message: 'Provide an email address' });
+  const { email, mobileNumber } = req.body;
+  const rawEmail = email ? String(email).trim() : '';
+  const rawMobile = mobileNumber ? String(mobileNumber).trim() : '';
+
+  if (!rawEmail && !rawMobile) {
+    return res.status(400).json({ message: 'Provide an email address or mobile number' });
   }
 
   const group = await Group.findById(req.params.id);
@@ -215,51 +276,98 @@ const inviteMember = asyncHandler(async (req, res) => {
     return res.status(403).json({ message: 'Not a member of this group' });
   }
 
-  const normalisedEmail = String(email).toLowerCase().trim();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalisedEmail)) {
-    return res.status(400).json({ message: 'That does not look like an email address' });
+  if (rawEmail) {
+    const normalisedEmail = rawEmail.toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalisedEmail)) {
+      return res.status(400).json({ message: 'That does not look like an email address' });
+    }
+
+    // Already on the app? Add them directly.
+    const existing = await User.findOne({ email: normalisedEmail });
+    if (existing) {
+      if (isMember(group, existing._id)) {
+        return res.status(409).json({ message: 'User is already a member' });
+      }
+      group.members.push(existing._id);
+      await group.save();
+      const populated = await loadGroup(group._id);
+      return res.json({
+        group: present(populated, req.user._id),
+        added: true,
+        message: `${existing.name} was added to the group`,
+      });
+    }
+
+    const duplicate = group.invites.find(
+      (inv) => inv.status === 'pending' && inv.email === normalisedEmail
+    );
+    if (duplicate) {
+      return res.status(409).json({ message: 'An invite is already pending for them' });
+    }
+
+    group.invites.push({ email: normalisedEmail, invitedBy: req.user._id });
+    await group.save();
+
+    // Detached: a slow or unreachable relay must not fail the request. The
+    // invite is already saved, and the code can still be shared by hand.
+    notifySafely(() =>
+      notifyGroupInvite({ email: normalisedEmail, group, actor: req.user })
+    );
+
+    const populated = await loadGroup(group._id);
+    return res.status(201).json({
+      group: present(populated, req.user._id),
+      added: false,
+      message: `Invite sent to ${normalisedEmail}`,
+    });
   }
 
-  // Already on the app? Add them directly.
-  const existing = await User.findOne({ email: normalisedEmail });
-  if (existing) {
-    if (isMember(group, existing._id)) {
+  // Phone branch. User.mobileNumber is always a bare 10-digit Indian number
+  // (no country code, no separators — enforced on the User model itself),
+  // so an invite has to match that exact shape or it could never be
+  // resolved to a real account, and the auto-accept-on-join matching in
+  // addMember (which compares this field directly) would silently never
+  // fire. Strip spaces/dashes and an optional "+91"/"91" prefix first, so
+  // however the inviter typed it still normalises to what a real account
+  // would have.
+  const digitsOnly = rawMobile.replace(/[^\d]/g, '').replace(/^91(?=\d{10}$)/, '');
+  if (!/^[6-9]\d{9}$/.test(digitsOnly)) {
+    return res.status(400).json({
+      message: 'Enter a valid 10-digit mobile number starting with 6, 7, 8, or 9',
+    });
+  }
+  const normalisedMobile = digitsOnly;
+
+  const existingByPhone = await User.findOne({ mobileNumber: normalisedMobile });
+  if (existingByPhone) {
+    if (isMember(group, existingByPhone._id)) {
       return res.status(409).json({ message: 'User is already a member' });
     }
-    group.members.push(existing._id);
+    group.members.push(existingByPhone._id);
     await group.save();
     const populated = await loadGroup(group._id);
     return res.json({
       group: present(populated, req.user._id),
       added: true,
-      message: `${existing.name} was added to the group`,
+      message: `${existingByPhone.name} was added to the group`,
     });
   }
 
-  const duplicate = group.invites.find(
-    (inv) => inv.status === 'pending' && inv.email === normalisedEmail
+  const duplicatePhone = group.invites.find(
+    (inv) => inv.status === 'pending' && inv.mobileNumber === normalisedMobile
   );
-  if (duplicate) {
+  if (duplicatePhone) {
     return res.status(409).json({ message: 'An invite is already pending for them' });
   }
 
-  group.invites.push({
-    email: normalisedEmail,
-    invitedBy: req.user._id,
-  });
+  group.invites.push({ mobileNumber: normalisedMobile, invitedBy: req.user._id });
   await group.save();
-
-  // Detached: a slow or unreachable relay must not fail the request. The
-  // invite is already saved, and the code can still be shared by hand.
-  notifySafely(() =>
-    notifyGroupInvite({ email: normalisedEmail, group, actor: req.user })
-  );
 
   const populated = await loadGroup(group._id);
   res.status(201).json({
     group: present(populated, req.user._id),
     added: false,
-    message: `Invite sent to ${normalisedEmail}`,
+    message: `Saved — share the join link or code with ${normalisedMobile}`,
   });
 });
 
@@ -500,6 +608,7 @@ module.exports = {
   getGroupTypes,
   getGroup,
   updateGroup,
+  setDefaultSplit,
   addMember,
   inviteMember,
   revokeInvite,
