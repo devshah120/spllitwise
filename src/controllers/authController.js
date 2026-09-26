@@ -16,7 +16,8 @@ const sanitize = (user) => ({
   preferredCurrency: user.preferredCurrency || 'INR',
   language: user.language || 'en',
   emailNotifications: user.emailNotifications !== false,
-  pushNotifications: user.pushNotifications !== false,
+  // Opt-in, not opt-out — must be explicitly true, unlike email above.
+  pushNotifications: user.pushNotifications === true,
   createdAt: user.createdAt,
 });
 

@@ -61,9 +61,11 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    // Off by default — a user has to explicitly opt in via the Profile
+    // screen's switch before any push notification is ever sent to them.
     pushNotifications: {
       type: Boolean,
-      default: true,
+      default: false,
     },
     resetPasswordToken: {
       type: String,

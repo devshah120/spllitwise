@@ -7,7 +7,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const { round2 } = require('../utils/splitCalculator');
 const { computeNet, simplifyDebts } = require('../utils/balances');
 const { buildInvite } = require('../utils/invite');
-const { notifyGroupInvite, notifySafely } = require('../utils/notifications');
+const { notifyGroupInvite, notifyMemberJoined, notifySafely } = require('../utils/notifications');
 
 const MEMBER_FIELDS = 'name email mobileNumber avatarUrl';
 
@@ -246,6 +246,8 @@ const addMember = asyncHandler(async (req, res) => {
   });
   await group.save();
 
+  notifySafely(() => notifyMemberJoined({ group, newMember: user, actor: req.user }));
+
   const populated = await loadGroup(group._id);
   res.json({ group: present(populated, req.user._id) });
 });
@@ -290,6 +292,7 @@ const inviteMember = asyncHandler(async (req, res) => {
       }
       group.members.push(existing._id);
       await group.save();
+      notifySafely(() => notifyMemberJoined({ group, newMember: existing, actor: req.user }));
       const populated = await loadGroup(group._id);
       return res.json({
         group: present(populated, req.user._id),
@@ -345,6 +348,7 @@ const inviteMember = asyncHandler(async (req, res) => {
     }
     group.members.push(existingByPhone._id);
     await group.save();
+    notifySafely(() => notifyMemberJoined({ group, newMember: existingByPhone, actor: req.user }));
     const populated = await loadGroup(group._id);
     return res.json({
       group: present(populated, req.user._id),
@@ -505,6 +509,8 @@ const joinByCode = asyncHandler(async (req, res) => {
     }
   });
   await group.save();
+
+  notifySafely(() => notifyMemberJoined({ group, newMember: req.user, actor: req.user }));
 
   const populated = await loadGroup(group._id);
   res.json({

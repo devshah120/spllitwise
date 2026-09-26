@@ -5,6 +5,9 @@ node_modules/
 coverage/
 dist/
 
+# Firebase service-account key (push notifications) — a secret, never committed.
+src/config/firebase-service-account.json
+
 # User-uploaded files
 uploads/
 preview/

@@ -1,6 +1,7 @@
 require('dotenv').config();
 const app = require('./app');
 const connectDB = require('./config/db');
+const { initFirebase } = require('./config/firebase');
 const { runDueRecurringExpenses } = require('./utils/recurringScheduler');
 
 const PORT = process.env.PORT || 5000;
@@ -9,6 +10,7 @@ const RECURRING_CHECK_INTERVAL_MS = 60 * 60 * 1000; // hourly is plenty for week
 const start = async () => {
   try {
     await connectDB();
+    initFirebase();
     app.listen(PORT, () => {
       console.log(`Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
     });
